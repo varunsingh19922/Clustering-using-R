@@ -12,16 +12,9 @@ library(ggplot2)
 library(fclust)
 library(reshape2)
 library(openxlsx)
-# these are packages you will need, but probably already have.
-# Don't bother installing if you already have them
-install.packages(c("ggplot2", "devtools", "dplyr", "stringr"))
 
 # some standard map packages.
 install.packages(c("maps", "mapdata"))
-
-# the github version of ggmap, which recently pulled in a small fix I had
-# for a bug 
-devtools::install_github("dkahle/ggmap")
 
 Economic_data <- read.xlsx("C:/Users/varun/OneDrive/Desktop/Assignment/CS 7331/Project 3/Dataset/Economic.xlsx")
 Economic_data$total_households <- Economic_data$nonfamily_households + Economic_data$family_households
