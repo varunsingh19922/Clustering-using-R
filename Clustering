@@ -1,0 +1,814 @@
+library(dbscan)
+library(openxlsx)
+library(tidyverse)
+library(isotree)
+library(tiff)
+library(png)
+library(cluster)
+library(dendextend)
+library(ggraph)
+library(ggplot2)
+library(fclust)
+
+Economic_data <- read.xlsx("C:/Users/varun/OneDrive/Desktop/Assignment/CS 7331/project 2/Dataset/Economic.xlsx")
+Economic_data$total_households <- Economic_data$nonfamily_households + Economic_data$family_households
+Economic_data$households_public_asst_or_food_stamps <- (Economic_data$households_public_asst_or_food_stamps / Economic_data$total_households) * 1000
+Economic_data$poverty <- (Economic_data$poverty / Economic_data$total_pop) * 1000
+
+
+# Select columns to scale
+columns_to_scale <- c("median_income", "income_per_capita", "median_rent", "gini_index", "poverty", "households_public_asst_or_food_stamps")
+
+# Scale selected columns
+scaled_columns <- scale(Economic_data[columns_to_scale])
+
+# Combine the scaled columns with the rest of the original data
+scaled_data <- cbind(Economic_data[, -which(names(Economic_data) %in% columns_to_scale)], scaled_columns)
+
+head(scaled_data)
+scaled_data <- na.omit(scaled_data)
+
+dim(scaled_data)
+
+subset_data <- scaled_data[columns_to_scale]
+dim(subset_data)
+
+
+library(isotree)
+# Create an Isolation Forest model on scaled_data
+model <- isolation.forest(subset_data, ntree = 100, nthreads = 1)  # ntree and nthreads are optional parameters
+
+# Define a threshold to classify outliers
+
+scores <- predict(model, subset_data, type = "avg_depth")
+
+summary(scores)
+scaled_data$scores <- scores
+subset_data$scores <- scores
+
+# Assuming 'scores' is the vector of anomaly scores
+threshold <- quantile(scores, 0.2)
+
+# Print the threshold value
+print(paste("Threshold value for 80% retention:", threshold))
+
+
+scaled_data <- scaled_data[scaled_data$scores > 19.70, ]
+subset_data <- subset_data[subset_data$scores > 19.70, ]
+
+
+summary(scaled_data)
+dim(scaled_data)
+
+summary(subset_data)
+dim(subset_data)
+
+
+# Assuming 'data' is your dataset and 'column_name' is the name of the column you want to drop
+data <- subset_data[, !(names(subset_data) %in% c("scores"))]
+summary(data)
+
+
+#PCA analysis
+
+
+# Perform PCA
+pca_result <- prcomp(data, center = FALSE, scale. = FALSE)
+
+# Calculate proportion of variance explained by each principal component
+variance_explained <- pca_result$sdev^2
+proportion_of_variance <- variance_explained / sum(variance_explained)
+
+# Output the proportions of variance explained by each principal component
+print(proportion_of_variance*100)
+
+# Calculate the percentage of variance explained by PC1 and PC2
+pc1_percentage <- pca_result$sdev[1]^2 / sum(pca_result$sdev^2) * 100
+pc2_percentage <- pca_result$sdev[2]^2 / sum(pca_result$sdev^2) * 100
+
+
+
+# Combine PC1 and PC2 into a matrix for k-means clustering
+pc_matrix <- cbind(pc1, pc2)
+
+# Convert to dataframe
+pc_dataframe <- data.frame(pc1 = pc_matrix[, 1], pc2 = pc_matrix[, 2])
+
+# Display the resulting dataframe
+print(pc_dataframe)
+
+# Install and load the cluster package if not already installed
+# install.packages("cluster")
+library(cluster)
+
+# Install and load the fpc package if not already installed
+# install.packages("fpc")
+library(fpc)
+
+
+# Install and load the kernlab package if not already installed
+# install.packages("kernlab")
+library(kernlab)
+
+# Assuming pc_dataframe is your data frame with columns pc1 and pc2
+# Replace this with your actual data or load your data into pc_dataframe
+
+# Combine PC1 and PC2 into a matrix for clustering
+pc_matrix <- cbind(pc_dataframe$pc1, pc_dataframe$pc2)
+# Install and load the apcluster package if not already installed
+# install.packages("apcluster")
+library(apcluster)
+
+
+# Assuming 'pc_matrix' is your PCA matrix
+
+# Load the necessary library
+library(dbscan)
+# Run OPTICS clustering
+# Assuming 'data' is your dataset and 'k' is the number of clusters
+library(cluster)
+
+
+
+
+
+# Assuming 'pc_dataframe' is your data frame with columns 'pc1' and 'pc2'
+
+# Set the dimensions and resolution of the plot
+width <- 6  # Set the width of the plot (in inches)
+height <- 6  # Set the height of the plot (in inches)
+dpi <- 300   # Set the resolution to 300 DPI for high-quality output
+
+# Define distance metrics
+metrics <- c("euclidean", "manhattan")
+
+for (metric in metrics) {
+  # Run PAM clustering
+  pam_result <- pam(pc_dataframe, metric = metric, k = 2)  # Adjust the number of clusters as needed
+  
+  # Extract cluster assignments
+  clusters <- pam_result$cluster
+  
+  # Create a plot file path based on the metric
+  tiff_file_path <- paste0("PAM_cluster_", tolower(metric), ".tiff")
+  
+  # Save the plot to a TIFF file
+  tiff(file = tiff_file_path, width = width * dpi, height = height * dpi, units = "px", res = dpi)
+  
+  # Visualize the clusters
+  plot(pc_dataframe, col = clusters, xlab = "PC1", ylab = "PC2", pch = 16, main = paste("PAM Clustering with", metric, "metric"))
+  
+  # Close the TIFF file
+  dev.off()
+}
+
+pam_result <- pam(pc_dataframe, metric = "euclidean", k = 2)  # Adjust the number of clusters as needed
+pam_result2 <- pam(pc_dataframe, metric = "manhattan", k = 2)
+# Extract cluster assignments
+cluster1 <- pam_result$cluster
+cluster2 <- pam_result2$cluster
+
+
+
+# Silhouette analysis for clusters from hierarchical clustering (average linkage)
+silhouette_avg <- silhouette(cluster2, dist(pc_matrix))
+cat("Average Silhouette Width (Average Linkage):", mean(silhouette_avg[, "sil_width"]), "\n")
+
+summary(silhouette_avg)
+
+# Plot silhouette for average linkage using factoextra
+fviz_silhouette(silhouette_avg, main = "CLustering done using manhattan metric - Economic Data")
+
+
+
+
+
+
+
+
+
+scaled_data_with_labels <- cbind(data, Cluster = cluster1)
+summary(scaled_data_with_labels)
+library(reshape2)
+
+scaled_data_with_labels$median_income <- scaled_data_with_labels$median_income + 1.5403
+
+scaled_data_with_labels$income_per_capita <- scaled_data_with_labels$income_per_capita + 1.55671
+
+scaled_data_with_labels$poverty <- scaled_data_with_labels$poverty + 1.6032
+scaled_data_with_labels$median_rent <- scaled_data_with_labels$median_rent + 1.4495
+scaled_data_with_labels$households_public_asst_or_food_stamps <- scaled_data_with_labels$households_public_asst_or_food_stamps + 1.89136
+
+# Assuming 'scaled_data_with_labels' is your data frame
+scaled_data_with_labels$households_on_Public_asst <- scaled_data_with_labels$households_public_asst_or_food_stamps
+scaled_data_with_labels <- subset(scaled_data_with_labels, select = -households_public_asst_or_food_stamps)
+scaled_data_with_labels <- subset(scaled_data_with_labels, select = -gini_index)
+
+
+averages <- aggregate(. ~ Cluster, data = scaled_data_with_labels, FUN = mean)
+
+melted_data <- melt(averages, id.vars = "Cluster")
+melted_data
+
+# Create a bar graph using ggplot2
+gg <-ggplot(melted_data, aes(x = variable, y = value, fill = factor(Cluster))) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "PAM Clustering using Euclidean metric",
+       x = "Variables",
+       y = "Average Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+tiff_file_path <- "EuclideanPAMBarGraph.tiff"
+
+
+# Set the dimensions and resolution of the plot
+width <- 6  # Set the width of the plot (in inches)
+height <- 6  # Set the height of the plot (in inches)
+dpi <- 300   # Set the resolution to 300 DPI for high-quality output
+
+# Save the plot as a TIFF file with specified dimensions, resolution, and compression for high quality
+ggsave(tiff_file_path, plot = gg, width = width, height = height, units = "in", dpi = dpi)
+
+
+
+
+
+
+
+
+
+# Assign cluster labels to the original dataset
+scaled_data_with_labels <- cbind(data, Cluster = cluster2)
+summary(scaled_data_with_labels)
+scaled_data_with_labels$median_income <- scaled_data_with_labels$median_income + 1.5403
+
+scaled_data_with_labels$income_per_capita <- scaled_data_with_labels$income_per_capita + 1.55671
+
+scaled_data_with_labels$poverty <- scaled_data_with_labels$poverty + 1.6032
+scaled_data_with_labels$median_rent <- scaled_data_with_labels$median_rent + 1.4495
+scaled_data_with_labels$households_public_asst_or_food_stamps <- scaled_data_with_labels$households_public_asst_or_food_stamps + 1.89136
+
+# Assuming 'scaled_data_with_labels' is your data frame
+scaled_data_with_labels$households_on_Public_asst <- scaled_data_with_labels$households_public_asst_or_food_stamps
+scaled_data_with_labels <- subset(scaled_data_with_labels, select = -households_public_asst_or_food_stamps)
+scaled_data_with_labels <- subset(scaled_data_with_labels, select = -gini_index)
+
+
+summary(scaled_data_with_labels)
+library(reshape2)
+
+
+averages <- aggregate(. ~ Cluster, data = scaled_data_with_labels, FUN = mean)
+
+melted_data <- melt(averages, id.vars = "Cluster")
+melted_data
+# Create a bar graph using ggplot2
+gg <-ggplot(melted_data, aes(x = variable, y = value, fill = factor(Cluster))) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "PAM Clustering using Manhattan metric",
+       x = "Variables",
+       y = "Average Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+tiff_file_path <- "ManhattanPAMBarGraph.tiff"
+
+# Set the dimensions and resolution of the plot
+width <- 6  # Set the width of the plot (in inches)
+height <- 6  # Set the height of the plot (in inches)
+dpi <- 300   # Set the resolution to 300 DPI for high-quality output
+
+# Save the plot as a TIFF file with specified dimensions, resolution, and compression for high quality
+ggsave(tiff_file_path, plot = gg, width = width, height = height, units = "in", dpi = dpi)
+
+
+# Combine deaths and cluster assignments into a data frame
+deaths_clusters_euclidean <- data.frame(deaths = scaled_data$deaths, Cluster = as.factor(cluster1))
+deaths_clusters_manhattan <- data.frame(deaths = scaled_data$deaths, Cluster = as.factor(cluster2))
+
+# Combine confirmed cases and cluster assignments into a data frame
+cases_clusters_euclidean <- data.frame(confirmed_cases = scaled_data$confirmed_cases, Cluster = as.factor(cluster1))
+cases_clusters_manhattan <- data.frame(confirmed_cases = scaled_data$confirmed_cases, Cluster = as.factor(cluster2))
+
+library(ggplot2)
+
+# Assuming you have created deaths_clusters_average, deaths_clusters_ward, 
+# cases_clusters_average, and cases_clusters_ward data frames
+
+# Function to create a side-by-side bar graph for deaths or cases
+create_bar_graph <- function(data, variable, title) {
+  ggplot(data, aes(x = factor(Cluster), y = get(variable), fill = factor(Cluster))) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(title = title,
+         x = "Cluster",
+         y = variable) +
+    theme_minimal()
+}
+
+
+# Create and save side-by-side bar graphs for deaths
+bar_deaths_euclidean <- create_bar_graph(deaths_clusters_euclidean, "deaths", "Deaths - PAM clustering with Euclidean metric")
+ggsave("bar_deaths_euclidean.tiff", bar_deaths_euclidean, width = 8, height = 6, units = "in")
+
+bar_deaths_manhattan <- create_bar_graph(deaths_clusters_manhattan, "deaths", "Deaths - PAM clustering with Manhattan metric")
+ggsave("bar_deaths_manhattan.tiff", bar_deaths_manhattan, width = 8, height = 6, units = "in")
+
+# Create and save side-by-side bar graphs for confirmed cases
+bar_cases_euclidean <- create_bar_graph(cases_clusters_euclidean, "confirmed_cases", "Confirmed Cases - PAM clustering with Euclidean metric")
+ggsave("bar_cases_euclidean.tiff", bar_cases_euclidean, width = 8, height = 6, units = "in")
+
+bar_cases_manhattan <- create_bar_graph(cases_clusters_manhattan, "confirmed_cases", "Confirmed Cases - PAM clustering with Manhattan metric")
+ggsave("bar_cases_manhattan.tiff", bar_cases_manhattan, width = 8, height = 6, units = "in")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(dbscan)
+library(openxlsx)
+library(tidyverse)
+library(isotree)
+library(tiff)
+library(png)
+library(cluster)
+library(dendextend)
+library(ggraph)
+library(ggplot2)
+library(fclust)
+library(reshape2)
+Job_data <- read.xlsx("C:/Users/varun/OneDrive/Desktop/Assignment/CS 7331/project 2/Dataset/DATASET.xlsx")
+
+summary(Job_data)
+# Install and load the required packages
+install.packages("flextable")
+library(flextable)
+
+# Assuming 'your_data' is your data frame
+summary_stats <- as.data.frame(summary(Job_data))
+
+summary_stats
+
+# Create a flextable
+flex_table <- flextable(summary_stats) %>%
+  set_table_properties(width = .8, layout = "autofit")
+
+# Save the flextable to a Word document
+save_as_docx(flex_table, path = "editable_table.docx")
+
+
+
+
+
+
+
+
+Job_data$employed_agriculture_forestry_fishing_hunting_mining <- (Job_data$employed_agriculture_forestry_fishing_hunting_mining / Job_data$total_pop) *1000
+Job_data$employed_arts_entertainment_recreation_accommodation_food <- (Job_data$employed_arts_entertainment_recreation_accommodation_food / Job_data$total_pop) *1000 
+Job_data$employed_construction <- (Job_data$employed_construction / Job_data$total_pop) *1000
+Job_data$employed_education_health_social <- (Job_data$employed_education_health_social / Job_data$total_pop) *1000
+Job_data$employed_finance_insurance_real_estate <- (Job_data$employed_finance_insurance_real_estate / Job_data$total_pop) *1000
+Job_data$employed_information <- (Job_data$employed_information / Job_data$total_pop) *1000
+Job_data$employed_manufacturing <- (Job_data$employed_manufacturing / Job_data$total_pop) *1000
+Job_data$employed_other_services_not_public_admin <- (Job_data$employed_other_services_not_public_admin / Job_data$total_pop) *1000
+Job_data$employed_public_administration <- (Job_data$employed_public_administration / Job_data$total_pop) *1000
+Job_data$employed_retail_trade <- (Job_data$employed_retail_trade / Job_data$total_pop) *1000
+Job_data$employed_science_management_admin_waste <- (Job_data$employed_science_management_admin_waste / Job_data$total_pop) *1000
+Job_data$employed_transportation_warehousing_utilities <- (Job_data$employed_transportation_warehousing_utilities / Job_data$total_pop) *1000
+Job_data$employed_wholesale_trade <- (Job_data$employed_wholesale_trade / Job_data$total_pop) *1000
+Job_data$confirmed_cases <- (Job_data$confirmed_cases / Job_data$total_pop) *1000
+Job_data$deaths <- (Job_data$deaths / Job_data$total_pop) *1000
+
+columns_to_scale <- c("employed_agriculture_forestry_fishing_hunting_mining", "employed_arts_entertainment_recreation_accommodation_food", "employed_construction", "employed_education_health_social", "employed_finance_insurance_real_estate", "employed_information", "employed_manufacturing", "employed_other_services_not_public_admin", "employed_retail_trade", "employed_public_administration","employed_science_management_admin_waste", "employed_transportation_warehousing_utilities", "employed_wholesale_trade")
+
+# Scale selected columns
+scaled_columns <- scale(Job_data[columns_to_scale])
+
+# Combine the scaled columns with the rest of the original data
+scaled_data <- cbind(Job_data[, -which(names(Job_data) %in% columns_to_scale)], scaled_columns)
+
+head(scaled_data)
+scaled_data <- na.omit(scaled_data)
+
+dim(scaled_data)
+
+subset_data <- scaled_data[columns_to_scale]
+dim(subset_data)
+
+
+library(isotree)
+# Create an Isolation Forest model on scaled_data
+model <- isolation.forest(subset_data, ntree = 100, nthreads = 1)  # ntree and nthreads are optional parameters
+
+# Define a threshold to classify outliers
+
+scores <- predict(model, subset_data, type = "avg_depth")
+
+summary(scores)
+scaled_data$scores <- scores
+subset_data$scores <- scores
+
+
+# Assuming 'scores' is the vector of anomaly scores
+threshold <- quantile(scores, 0.2)
+
+# Print the threshold value
+print(paste("Threshold value for 80% retention:", threshold))
+
+
+scaled_data <- scaled_data[scaled_data$scores > 21.86, ]
+subset_data <- subset_data[subset_data$scores > 21.86, ]
+
+
+summary(scaled_data)
+dim(scaled_data)
+
+summary(subset_data)
+dim(subset_data)
+
+
+# Assuming 'data' is your dataset and 'column_name' is the name of the column you want to drop
+data <- subset_data[, !(names(subset_data) %in% c("scores"))]
+summary(data)
+dim(data)
+
+#PCA analysis
+
+# Perform PCA
+pca_result <- prcomp(data, center = FALSE, scale. = FALSE)
+summary(pca_result)
+
+# Extract cumulative proportion of variance
+cumulative_variance <- cumsum(pca_result$sdev^2) / sum(pca_result$sdev^2)
+
+# Create a visually appealing scree plot
+plot(1:length(cumulative_variance), cumulative_variance, type = "b",
+     xlab = "Principal Component", ylab = "Cumulative Proportion of Variance",
+     main = "Scree Plot", col = "steelblue", pch = 19, cex = 1.5)
+
+# Add a horizontal line at 0.8 for reference
+abline(h = 0.8, col = "red", lty = 2)
+
+# Identify the number of components needed to reach 80% cumulative proportion
+components_to_retain <- sum(cumulative_variance <= 0.8) + 1
+text(components_to_retain, 0.8, paste("PC", components_to_retain), pos = 4, col = "red", cex = 1.2)
+
+# Save the plot as a TIFF file
+tiff_file_path <- "scree_plot_PCA.tiff"
+dev.copy(tiff, file = tiff_file_path, width = 6, height = 6, units = "in", res = 300)
+dev.off()
+
+
+
+
+# Calculate proportion of variance explained by each principal component
+variance_explained <- pca_result$sdev^2
+proportion_of_variance <- variance_explained / sum(variance_explained)
+
+# Output the proportions of variance explained by each principal component
+print(proportion_of_variance*100)
+
+# Calculate the percentage of variance explained by PC1 and PC2
+pc1_percentage <- pca_result$sdev[1]^2 / sum(pca_result$sdev^2) * 100
+pc2_percentage <- pca_result$sdev[2]^2 / sum(pca_result$sdev^2) * 100
+pc1_percentage
+pc2_percentage
+
+pc1 <- pca_result$x[, 1]  # Extracting the first principal component
+pc2 <- pca_result$x[, 2]
+
+
+# Combine PC1 and PC2 into a matrix for k-means clustering
+pc_matrix <- cbind(pc1, pc2)
+
+# Convert to dataframe
+pc_dataframe <- data.frame(pc1 = pc_matrix[, 1], pc2 = pc_matrix[, 2])
+
+# Display the resulting dataframe
+print(pc_dataframe)
+
+
+
+
+
+# Assuming 'data' is your dataset and 'column_name' is the name of the column you want to drop
+data <- subset_data[, !(names(subset_data) %in% c("scores"))]
+summary(data)
+dim(data)
+
+library(Rtsne)
+
+
+tsne_result <- Rtsne(data)
+
+# Create a matrix from t-SNE coordinates
+tsne_matrix <- as.matrix(tsne_coordinates)
+summary(tsne_matrix)
+# Create a data frame from t-SNE matrix
+tsne_df <- data.frame(tsne_matrix)
+
+
+# Access the t-SNE coordinates
+tsne_coordinates <- tsne_result$Y
+
+head(tsne_df)
+
+
+
+
+
+
+
+
+
+
+
+# Assuming 'pc_matrix' is your matrix containing PC1 and PC2 data
+distance_matrix <- dist(tsne_matrix, method = "euclidean")
+
+# Perform hierarchical clustering using average linkage
+hierarchical_cluster_averageLinkage <- hclust(distance_matrix, method = "average")
+
+# Perform hierarchical clustering using Ward's method
+hierarchical_cluster_wardLinkage <- hclust(distance_matrix, method = "ward.D2")
+
+# Cut the dendrogram to get three clusters
+num_clusters <- 3
+cluster1 <- cutree(hierarchical_cluster_averageLinkage, k = num_clusters)
+cluster2 <- cutree(hierarchical_cluster_wardLinkage, k = num_clusters)
+
+
+# Distance matrix
+d <- dist(tsne_matrix)
+
+# Hierarchical clustering
+hc <- hclust(d)
+
+# Cluster colors
+plot(as.dendrogram(hc))
+rect.hclust(hc, k = 3,
+            border = 3:4)
+
+
+
+
+
+# Silhouette analysis for clusters from hierarchical clustering (average linkage)
+silhouette_avg <- silhouette(cluster2, dist(pc_matrix))
+cat("Average Silhouette Width (Average Linkage):", mean(silhouette_avg[, "sil_width"]), "\n")
+
+summary(silhouette_avg)
+
+# Plot silhouette for average linkage using factoextra
+fviz_silhouette(silhouette_avg, main = "Silhouette Plot of CLusters - Employment Data")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Set the dimensions and resolution of the plot
+width <- 6  # Set the width of the plot (in inches)
+height <- 6  # Set the height of the plot (in inches)
+dpi <- 300   # Set the resolution to 300 DPI for high-quality output
+
+# Color assignments for observations in the dendrogram
+dendrogram_colors_average <- c("blue", "red", "green")[cluster1]  # Choose colors for average linkage clusters
+dendrogram_colors_ward <- c("blue", "red", "green")[cluster2]     # Choose colors for Ward's linkage clusters
+
+# Visualize the dendrogram with colored clusters (average linkage)
+dend_average <- as.dendrogram(hierarchical_cluster_averageLinkage)
+dend_average <- dend_average %>% set("labels", "") %>% set("branches_k_color", k = num_clusters, value = dendrogram_colors_average)
+plot(dend_average, main = "Clustering Dendrogram (using average linkage)", xlab = "Observations", sub = NULL, axes = FALSE)
+
+# Visualize the dendrogram with colored clusters (Ward's method)
+dend_ward <- as.dendrogram(hierarchical_cluster_wardLinkage)
+dend_ward
+
+plot(dend_ward, main = "Hierarchical Clustering Dendrogram (using Ward linkage)", xlab = "Observations", sub = NULL, axes = FALSE)
+
+summary(cluster2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Specify the file path for saving the TIFF file
+tiff_file_path_average <- "hierarchical_cluster_plot_average.tiff"
+tiff_file_path_ward <- "hierarchical_cluster_plot_ward.tiff"
+
+
+# Visualize the clustered data for Average Linkage
+tiff(file = tiff_file_path_average, width = width * dpi, height = height * dpi, units = "px", res = dpi)
+plot(tsne_matrix[, 1], tsne_matrix[, 2], col = cluster1, pch = 19, main = "Hierarchical Clustering with Average Linkage", xlab = "X1", ylab = "X2")
+dev.off()
+
+# Visualize the clustered data for Ward Linkage
+tiff(file = tiff_file_path_ward, width = width * dpi, height = height * dpi, units = "px", res = dpi)
+plot(tsne_matrix[, 1], tsne_matrix[, 2], col = cluster2, pch = 19, main = "Hierarchical Clustering with Ward Linkage", xlab = "X1", ylab = "X2")
+dev.off()
+
+
+
+
+
+
+
+scaled_data_with_labels <- cbind(data, Cluster = cluster1)
+summary(scaled_data_with_labels)
+library(reshape2)
+
+
+averages <- aggregate(. ~ Cluster, data = scaled_data_with_labels, FUN = mean)
+
+melted_data<- melt(averages, id.vars = "Cluster")
+head(melted_data)
+
+# Assuming melted_data is your data frame obtained from melting cluster averages
+
+# Add a constant value to make all values positive
+# Assuming melted_data is your melted data frame
+
+# Find the minimum value in the 'value' column
+min_value <- min(melted_data$value)
+
+# If the minimum value is negative, add a constant value to shift it to be non-negative
+if (min_value < 0) {
+  constant_value <- abs(min_value) + 1  # Add 1 to avoid zero
+  melted_data$value <- melted_data$value + constant_value
+}
+
+
+# Create a bar graph using ggplot2
+gg <-ggplot(melted_data, aes(x = variable, y = value, fill = factor(Cluster))) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "CLustering done using Average linkage method",
+       x = "Variables",
+       y = "Average Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+tiff_file_path <- "AverageLinkBarGraph.tiff"
+
+# Set the dimensions and resolution of the plot
+width <- 6  # Set the width of the plot (in inches)
+height <- 6  # Set the height of the plot (in inches)
+dpi <- 300   # Set the resolution to 300 DPI for high-quality output
+
+# Save the plot as a TIFF file with specified dimensions, resolution, and compression for high quality
+ggsave(tiff_file_path, plot = gg, width = width, height = height, units = "in", dpi = dpi)
+
+
+
+
+# Assign cluster labels to the original dataset
+scaled_data_with_labels <- cbind(data, Cluster = cluster2)
+
+library(reshape2)
+
+
+averages <- aggregate(. ~ Cluster, data = scaled_data_with_labels, FUN = mean)
+
+melted_data1 <- melt(averages, id.vars = "Cluster")
+head(melted_data)
+
+# Assuming melted_data is your data frame obtained from melting cluster averages
+
+# Add a constant value to make all values positive
+# Assuming melted_data is your melted data frame
+
+# Find the minimum value in the 'value' column
+min_value <- min(melted_data$value)
+
+# If the minimum value is negative, add a constant value to shift it to be non-negative
+if (min_value < 0) {
+  constant_value <- abs(min_value) + 1  # Add 1 to avoid zero
+  melted_data$value <- melted_data$value + constant_value
+}
+
+
+
+# Create a bar graph using ggplot2
+gg <-ggplot(melted_data, aes(x = variable, y = value, fill = factor(Cluster))) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  labs(title = "CLustering done using Ward linkage method",
+       x = "Variables",
+       y = "Average Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+tiff_file_path <- "WardLinkBarGraph.tiff"
+
+# Set the dimensions and resolution of the plot
+width <- 6  # Set the width of the plot (in inches)
+height <- 6  # Set the height of the plot (in inches)
+dpi <- 300   # Set the resolution to 300 DPI for high-quality output
+
+# Save the plot as a TIFF file with specified dimensions, resolution, and compression for high quality
+ggsave(tiff_file_path, plot = gg, width = width, height = height, units = "in", dpi = dpi)
+
+
+# Assuming 'scaled_data' is your original data frame
+# Assuming 'cluster1' and 'cluster2' are your cluster assignments
+
+# Combine deaths and cluster assignments into a data frame
+deaths_clusters_average <- data.frame(deaths = scaled_data$deaths, Cluster = as.factor(cluster1))
+deaths_clusters_ward <- data.frame(deaths = scaled_data$deaths, Cluster = as.factor(cluster2))
+
+# Combine confirmed cases and cluster assignments into a data frame
+cases_clusters_average <- data.frame(confirmed_cases = scaled_data$confirmed_cases, Cluster = as.factor(cluster1))
+cases_clusters_ward <- data.frame(confirmed_cases = scaled_data$confirmed_cases, Cluster = as.factor(cluster2))
+
+library(ggplot2)
+
+# Assuming you have created deaths_clusters_average, deaths_clusters_ward, 
+# cases_clusters_average, and cases_clusters_ward data frames
+
+# Function to create a side-by-side bar graph for deaths or cases
+create_bar_graph <- function(data, variable, title) {
+  ggplot(data, aes(x = factor(Cluster), y = get(variable), fill = factor(Cluster))) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(title = title,
+         x = "Cluster",
+         y = variable) +
+    theme_minimal()
+}
+
+# Create and save side-by-side bar graphs for deaths
+bar_deaths_average <- create_bar_graph(deaths_clusters_average, "deaths", "Deaths - Average Linkage")
+ggsave("bar_deaths_average.tiff", bar_deaths_average, width = 8, height = 6, units = "in")
+
+bar_deaths_ward <- create_bar_graph(deaths_clusters_ward, "deaths", "Deaths - Ward's Method")
+ggsave("bar_deaths_ward.tiff", bar_deaths_ward, width = 8, height = 6, units = "in")
+
+# Create and save side-by-side bar graphs for confirmed cases
+bar_cases_average <- create_bar_graph(cases_clusters_average, "confirmed_cases", "Confirmed Cases - Average Linkage")
+ggsave("bar_cases_average.tiff", bar_cases_average, width = 8, height = 6, units = "in")
+
+bar_cases_ward <- create_bar_graph(cases_clusters_ward, "confirmed_cases", "Confirmed Cases - Ward's Method")
+ggsave("bar_cases_ward.tiff", bar_cases_ward, width = 8, height = 6, units = "in")
+
+
+
+
+
+
+
+
+
+
+
+
