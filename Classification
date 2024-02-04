@@ -1,0 +1,847 @@
+library(dbscan)
+library(openxlsx)
+library(tidyverse)
+library(isotree)
+library(tiff)
+library(dplyr)
+library(png)
+library(cluster)
+library(dendextend)
+library(ggraph)
+library(ggplot2)
+library(fclust)
+library(reshape2)
+library(openxlsx)
+# these are packages you will need, but probably already have.
+# Don't bother installing if you already have them
+install.packages(c("ggplot2", "devtools", "dplyr", "stringr"))
+
+# some standard map packages.
+install.packages(c("maps", "mapdata"))
+
+# the github version of ggmap, which recently pulled in a small fix I had
+# for a bug 
+devtools::install_github("dkahle/ggmap")
+
+Economic_data <- read.xlsx("C:/Users/varun/OneDrive/Desktop/Assignment/CS 7331/Project 3/Dataset/Economic.xlsx")
+Economic_data$total_households <- Economic_data$nonfamily_households + Economic_data$family_households
+Economic_data$households_public_asst_or_food_stamps <- (Economic_data$households_public_asst_or_food_stamps / Economic_data$total_households) * 1000
+Economic_data$poverty <- (Economic_data$poverty / Economic_data$total_pop) * 1000
+Economic_data$confirmed_cases <- (Economic_data$confirmed_cases / Economic_data$total_pop) * 1000
+Economic_data$deaths <- (Economic_data$deaths / Economic_data$total_pop) * 1000
+
+summary(Economic_data$confirmed_cases)
+summary(Economic_data$deaths)
+# Assuming your data frame is named 'your_data' and you want to drop the 'column_to_drop'
+Economic_data$nonfamily_households <- NULL
+Economic_data$family_households <- NULL
+Economic_data$total_households <- NULL
+
+Economic_data <- na.omit(Economic_data)
+#For deaths average = 1.33
+
+
+Economic_data <- Economic_data %>%
+  mutate(target = ifelse(deaths > 1.33, 1, 0))
+summary(Economic_data)
+
+# Assuming your data frame is named 'Economic_data' and you want to scale specific numeric columns
+columns_to_scale <- c("confirmed_cases", "deaths", "total_pop", "median_income", "income_per_capita", "median_rent", "gini_index", "households_public_asst_or_food_stamps", "poverty")
+
+# Extract the columns to scale
+columns_scaled <- Economic_data[, columns_to_scale]
+
+# Scale the selected columns
+scaled_columns <- scale(columns_scaled)
+
+# Create a new data frame with scaled columns
+scaled_data <- cbind(Economic_data[, -which(names(Economic_data) %in% columns_to_scale)], as.data.frame(scaled_columns))
+head(scaled_data)
+scaled_data <- na.omit(scaled_data)
+
+dim(scaled_data)
+
+summary(Economic_data)
+summary(scaled_data)
+scaled_data$county_fips_code <- NULL
+scaled_data$county <- NULL
+scaled_data$county_name <- NULL
+scaled_data$state <- NULL
+scaled_data$confirmed_cases <- NULL
+scaled_data$deaths <- NULL
+scaled_data$total_pop <- NULL
+
+summary(scaled_data)
+summary(Economic_data)
+
+
+library(gplots)
+library(seriation)
+install.packages("gplots")
+
+cm <- cor(scaled_data %>% select_if(is.numeric) %>% na.omit)
+
+seriation_result <- seriate(cm)
+seriated_order <- get_order(seriation_result)
+
+# Apply the seriated order to the correlation matrix
+cm_seriated <- cm[seriated_order, seriated_order]
+# Set the size of the image
+image_size <- 1500
+
+# Create a PNG device with the specified size
+png("heatmap.png", width = image_size, height = image_size, units = "px", res = 300)
+
+heatmap.2(
+  cm_seriated,
+  trace = "none",
+  col = colorRampPalette(c("lightblue", "white", "coral"))(100),
+  main = "Correlation Matrix",
+  labRow = colnames(cm_seriated),
+  labCol = colnames(cm_seriated),
+  key = TRUE,
+  symkey = TRUE,
+  density.info = "density",
+  dendrogram = "both",
+  cexRow = 0.65, # Adjust text size for rows
+  cexCol = 0.65,  # Adjust text size for columns
+)
+
+
+dev.off()
+
+
+# Load required libraries
+library(tidyverse)
+library(maps)
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Rename and preprocess columns in the counties data
+counties <- counties %>% 
+  rename(c(county = subregion, state = region)) %>%
+  mutate(state = state.abb[match(state, tolower(state.name))]) %>%
+  select(state, county, long, lat, group)
+
+counties_all <- counties_all %>% 
+  left_join(Economic_data %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+
+png("US deaths map.png", width = 1300, height = 900, units = "px", res = 300)
+# Create a map
+ggplot(counties_all, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(target)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "U.S. Map with County Target Values") +
+  theme_minimal()
+
+
+dev.off()
+
+
+
+library(tidyverse)
+library(maps)
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Rename and preprocess columns in the counties data
+counties <- counties %>% 
+  rename(c(county = subregion, state = region)) %>%
+  mutate(state = state.abb[match(state, tolower(state.name))]) %>%
+  select(state, county, long, lat, group)
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+counties_all_tx <- counties_all %>% filter(state == "TX")
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+summary(counties_all_tx)
+# Set up the PNG device for saving the map
+png("Texas deaths map.png", width = 1300, height = 900, units = "px", res = 300)
+
+# Create a map of Texas
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(target.x)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+scaled_data$state <-Economic_data$state
+scaled_data$county <- Economic_data$county_name
+
+training_data <- scaled_data %>% filter(state != "TX")
+
+# Testing set: only Texas samples
+testing_data <- scaled_data %>% filter(state == "TX")
+
+# Display the dimensions of the training and testing sets
+cat("Training Set Size:", nrow(training_data), "\n")
+cat("Testing Set Size:", nrow(testing_data), "\n")
+
+
+
+
+summary(training_data)
+summary(testing_data)
+
+# Load necessary libraries
+library(rpart)
+library(randomForest)
+library(e1071)
+library(class)
+library(nnet)
+library(xgboost)
+library(MASS)
+library(caret)
+library(adabag)
+library(ggplot2)
+# Load the required library
+library(randomForest)
+
+# Select columns for modeling
+selected_columns <- c("median_income", "gini_index", "income_per_capita", "median_rent", "households_public_asst_or_food_stamps", "poverty")
+
+# Train Random Forest Model
+model_rf <- randomForest(target ~ ., data = training_data[, c(selected_columns, "target")])
+predictions <- predict(model_rf, newdata = testing_data[, selected_columns], type = "response")
+
+threshold <- 0.32
+
+
+
+# Convert predictions and true_labels to factors with the same levels
+df$predictions <- factor(ifelse(predictions > threshold, 1, 0), levels = c(0, 1))
+df$true_labels <- factor(df$true_labels, levels = c(0, 1))
+
+# Define a sequence of thresholds
+thresholds <- seq(0, 1, by = 0.01)
+
+# Calculate F1 scores for different thresholds
+f1_scores <- sapply(thresholds, function(threshold) {
+  binary_predictions <- ifelse(predictions > threshold, 1, 0)
+  # Ensure that binary_predictions is a factor with the same levels
+  binary_predictions <- factor(binary_predictions, levels = c(0, 1))
+  
+  conf_matrix <- confusionMatrix(binary_predictions, df$true_labels)
+  return(conf_matrix$byClass["F1"])
+})
+
+optimal_threshold <- thresholds[which.max(f1_scores)]
+print(paste("Optimal Threshold for F1 Score:", optimal_threshold))
+
+
+
+
+
+
+
+
+
+# Convert scores to binary class labels
+binary_predictions <- ifelse(predictions > threshold, 1, 0)
+
+# Open another PNG device for saving the variable importance plot
+png("variable_importance_plot.png", width = 800, height = 600)
+
+# Print the variable importance plot
+varImpPlot(model_rf, main = "Variable Importance in Random Forest")
+
+# Close the PNG device
+dev.off()
+
+
+
+# Evaluate the model performance
+conf_matrix <- table(binary_predictions, testing_data$target)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display model performance metrics
+cat("Confusion Matrix:\n", conf_matrix, "\n")
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+
+
+
+
+
+
+
+
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Rename and preprocess columns in the counties data
+counties <- counties %>% 
+  rename(c(county = subregion, state = region)) %>%
+  mutate(state = state.abb[match(state, tolower(state.name))]) %>%
+  select(state, county, long, lat, group)
+
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+economic_data_tx$predictions <- binary_predictions
+counties_all_tx <- counties_all %>% filter(state == "TX")
+counties_all_tx
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+summary(counties_all_tx)
+# Set up the PNG device for saving the map
+png("Texas prediction_RANDOM_FOREST.png", width = 1300, height = 900, units = "px", res = 300)
+counties_all_tx$predictions.y
+# Create a map of Texas
+
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(predictions)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+
+
+
+
+# Load the required library for SVM
+library(e1071)
+
+# Select columns for modeling
+selected_columns <- c("median_income", "gini_index", "income_per_capita", "median_rent", "households_public_asst_or_food_stamps", "poverty")
+
+# Train SVM Model
+model_svm <- svm(target ~ ., data = training_data[, c(selected_columns, "target")], kernel = "linear")
+predictions <- predict(model_svm, newdata = testing_data[, selected_columns])
+
+true_labels <- testing_data$target
+
+
+# Assuming your predictions and true labels are stored in 'predictions' and 'true_labels'
+library(caret)
+
+# Assuming your predictions and true labels are stored in 'predictions' and 'df$true_labels'
+library(caret)
+
+# Convert predictions and true_labels to factors with the same levels
+df$predictions <- factor(ifelse(predictions > threshold, 1, 0), levels = c(0, 1))
+df$true_labels <- factor(df$true_labels, levels = c(0, 1))
+
+# Define a sequence of thresholds
+thresholds <- seq(0, 1, by = 0.01)
+
+# Calculate F1 scores for different thresholds
+f1_scores <- sapply(thresholds, function(threshold) {
+  binary_predictions <- ifelse(predictions > threshold, 1, 0)
+  # Ensure that binary_predictions is a factor with the same levels
+  binary_predictions <- factor(binary_predictions, levels = c(0, 1))
+  
+  conf_matrix <- confusionMatrix(binary_predictions, df$true_labels)
+  return(conf_matrix$byClass["F1"])
+})
+
+optimal_threshold <- thresholds[which.max(f1_scores)]
+print(paste("Optimal Threshold for F1 Score:", optimal_threshold))
+
+
+
+
+
+
+mean(predictions)
+threshold <- 0.21
+
+# Convert scores to binary class labels
+binary_predictions <- ifelse(predictions > threshold, 1, 0)
+binary_predictions
+
+png("variable_importance_plot_svm.png", width = 800, height = 600)
+
+# Print the coefficient magnitude plot
+coef_magnitude <- abs(coef(model_svm)[-1])
+plot(1:length(selected_columns), coef_magnitude, type = 'b', xlab = 'Variable', ylab = 'Coefficient Magnitude', main = 'Variable Coefficient Magnitude in SVM')
+
+# Add feature names to the plot
+text(1:length(selected_columns), coef_magnitude, labels = names(coef_magnitude), pos = 3, cex = 0.8, col = "blue")
+
+
+# Close the PNG device
+dev.off()
+
+# Evaluate the model performance
+conf_matrix <- table(binary_predictions, testing_data$target)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display model performance metrics
+cat("Confusion Matrix:\n", conf_matrix, "\n")
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+economic_data_tx$predictions <- binary_predictions
+counties_all_tx <- counties_all %>% filter(state == "TX")
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+# Set up the PNG device for saving the map
+png("Texas prediction_svm.png", width = 1300, height = 900, units = "px", res = 300)
+
+# Create a map of Texas
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(predictions)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+
+
+
+
+
+# Load the required library for k-NN
+# Select columns for modeling
+selected_columns <- c("median_income", "gini_index", "income_per_capita", "median_rent", "households_public_asst_or_food_stamps", "poverty")
+
+# Train k-NN Model
+k <- 2  # You can adjust the value of k as needed
+model_knn <- knn(train = training_data[, selected_columns],  # Use only selected columns
+                 test = testing_data[, selected_columns],
+                 cl = training_data$target,
+                 k = k)
+
+# Assuming your predictions and true labels are stored in 'model_knn' and 'testing_data$target'
+library(caret)
+
+model_knn
+
+# Convert scores to binary class labels
+binary_predictions <- model_knn
+
+
+
+# Evaluate the model performance
+conf_matrix <- table(binary_predictions, testing_data$target)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display model performance metrics
+cat("Confusion Matrix:\n", conf_matrix, "\n")
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+economic_data_tx$predictions <- model_knn
+counties_all_tx <- counties_all %>% filter(state == "TX")
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+# Set up the PNG device for saving the map
+png("Texas prediction_knn.png", width = 1300, height = 900, units = "px", res = 300)
+
+# Create a map of Texas
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(predictions)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+
+
+
+# Naive Bayes
+model_nb <- naiveBayes(target ~ ., data = training_data[, c(selected_columns, "target")])
+predictions_nb <- predict(model_nb, newdata = testing_data[, selected_columns])
+
+binary_predictions <- predictions_nb
+binary_predictions
+model_knn
+
+# Evaluate the model performance
+conf_matrix <- table(binary_predictions, testing_data$target)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display model performance metrics
+cat("Confusion Matrix:\n", conf_matrix, "\n")
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+economic_data_tx$predictions <- binary_predictions
+counties_all_tx <- counties_all %>% filter(state == "TX")
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+# Set up the PNG device for saving the map
+png("Texas prediction_Naive_Bayes.png", width = 1300, height = 900, units = "px", res = 300)
+
+# Create a map of Texas
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(predictions)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Install the neuralnet package if not already installed
+if (!require(neuralnet)) {
+  install.packages("neuralnet")
+}
+
+# Load the neuralnet package
+library(neuralnet)
+
+# Neural Networks
+model_nn <- neuralnet(target ~ ., data = training_data[, c(selected_columns, "target")], 
+                      hidden = c(5, 2), linear.output = TRUE)
+
+
+predictions_nn <- predict(model_nn, newdata = testing_data[, selected_columns])
+
+predictions_nn
+
+# Example of hyperparameter tuning
+model_nn <- neuralnet(
+  target ~ ., 
+  data = training_data[, c(selected_columns, "target")], 
+  hidden = c(5,5), 
+  linear.output = TRUE,
+  learningrate = 2,
+  threshold = 0.5,
+  act.fct = "logistic",
+  lifesign = "full"
+)
+
+# Make predictions
+predictions_nn <- predict(model_nn, newdata = testing_data[, selected_columns])
+binary_predictions_nn <- ifelse(predictions_nn > threshold, 1, 0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Assuming your predictions and true labels are stored in 'predictions' and 'df$true_labels'
+library(caret)
+
+# Convert predictions and true_labels to factors with the same levels
+df$predictions <- factor(ifelse(predictions_nn > threshold, 1, 0), levels = c(0, 1))
+df$true_labels <- factor(df$true_labels, levels = c(0, 1))
+
+# Define a sequence of thresholds
+thresholds <- seq(0, 1, by = 0.01)
+
+# Calculate F1 scores for different thresholds
+f1_scores <- sapply(thresholds, function(threshold) {
+  binary_predictions <- ifelse(predictions_nn > threshold, 1, 0)
+  # Ensure that binary_predictions is a factor with the same levels
+  binary_predictions <- factor(binary_predictions, levels = c(0, 1))
+  
+  conf_matrix <- confusionMatrix(binary_predictions, df$true_labels)
+  return(conf_matrix$byClass["F1"])
+})
+
+optimal_threshold <- thresholds[which.max(f1_scores)]
+print(paste("Optimal Threshold for F1 Score:", optimal_threshold))
+
+
+
+
+
+
+mean(predictions)
+threshold <- 1
+
+# Convert scores to binary class labels
+binary_predictions <- ifelse(predictions > threshold, 1, 0)
+binary_predictions
+
+
+
+
+# Evaluate the model performance
+conf_matrix <- table(binary_predictions, testing_data$target)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display model performance metrics
+cat("Confusion Matrix:\n", conf_matrix, "\n")
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+economic_data_tx$predictions <- binary_predictions
+counties_all_tx <- counties_all %>% filter(state == "TX")
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+# Set up the PNG device for saving the map
+png("Texas prediction_Nueral.png", width = 1300, height = 900, units = "px", res = 300)
+
+# Create a map of Texas
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(predictions)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+training_data[, c(selected_columns, "target")]
+testing_data[, selected_columns]
+# Gradient Boosting Algorithms (XGBoost)
+model_xgb <- xgboost(data = as.matrix(train_data[, -target_column]), label = train_data$target_variable, nrounds = 10)
+predictions_xgb <- predict(model_xgb, as.matrix(test_data[, -target_column]))
+
+# Neural Networks
+model_nn <- neuralnet(target ~ ., data = training_data[, c(selected_columns, "target")], 
+                      hidden = c(5, 2), linear.output = TRUE, rep = 10)
+
+
+predictions_nn <- predict(model_nn, newdata = testing_data[, selected_columns])
+
+predictions_nn
+
+binary_predictions <- predictions_nb
+binary_predictions
+model_knn
+
+# Evaluate the model performance
+conf_matrix <- table(binary_predictions, testing_data$target)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display model performance metrics
+cat("Confusion Matrix:\n", conf_matrix, "\n")
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+
+
+# Create a tibble of county map data
+counties <- as_tibble(map_data("county"))
+
+# Filter Economic_data and counties_all for Texas
+economic_data_tx <- Economic_data %>% filter(state == "TX")
+economic_data_tx$predictions <- binary_predictions
+counties_all_tx <- counties_all %>% filter(state == "TX")
+
+# Merge Economic_data with counties_all_tx
+counties_all_tx <- counties_all_tx %>% 
+  left_join(economic_data_tx %>% 
+              mutate(county = county_name %>% str_to_lower() %>% str_replace('\\s+county\\s*$', '')),
+            by = c("state", "county"))
+
+# Set up the PNG device for saving the map
+png("Texas prediction_Naive_Bayes.png", width = 1300, height = 900, units = "px", res = 300)
+
+# Create a map of Texas
+ggplot(counties_all_tx, aes(long, lat)) + 
+  geom_polygon(aes(group = group, fill = as.factor(predictions)), color = "black", size = 0.1) +
+  coord_quickmap() +
+  scale_fill_manual(values = c('0' = 'grey', '1' = 'red'), name = "Target") +
+  labs(title = "Texas Map with County Target Values") +
+  theme_minimal()
+
+# Save the map
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Linear Discriminant Analysis (LDA)
+model_lda <- lda(target_variable ~ ., data = train_data)
+predictions_lda <- predict(model_lda, newdata = test_data)$class
+
+# Ensemble Learning (Voting Classifier)
+models <- list(
+  logistic_reg = glm(target_variable ~ ., data = train_data, family = "binomial"),
+  random_forest = randomForest(target_variable ~ ., data = train_data)
+)
+ensemble <- caretEnsemble(models)
+predictions_ensemble <- predict(ensemble, newdata = test_data)
+
+# Adaboost
+model_adaboost <- boosting(target_variable ~ ., data = train_data)
+predictions_adaboost <- predict(model_adaboost, newdata = test_data)
+
+# Add any additional models as needed...
+
+# Evaluate and compare model performances
+# ... (insert code for evaluating and comparing model performances)
+
+# Note: Ensure that you customize the code based on your specific dataset and requirements.
+
+
+
+
+
