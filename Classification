@@ -16,6 +16,8 @@ library(openxlsx)
 # some standard map packages.
 install.packages(c("maps", "mapdata"))
 
+# Read the dataset and created columns which hold the average values per 1000 people
+
 Economic_data <- read.xlsx("C:/Users/varun/OneDrive/Desktop/Assignment/CS 7331/Project 3/Dataset/Economic.xlsx")
 Economic_data$total_households <- Economic_data$nonfamily_households + Economic_data$family_households
 Economic_data$households_public_asst_or_food_stamps <- (Economic_data$households_public_asst_or_food_stamps / Economic_data$total_households) * 1000
@@ -25,37 +27,29 @@ Economic_data$deaths <- (Economic_data$deaths / Economic_data$total_pop) * 1000
 
 summary(Economic_data$confirmed_cases)
 summary(Economic_data$deaths)
-# Assuming your data frame is named 'your_data' and you want to drop the 'column_to_drop'
-Economic_data$nonfamily_households <- NULL
-Economic_data$family_households <- NULL
-Economic_data$total_households <- NULL
 
+# removing samples with missing values 
 Economic_data <- na.omit(Economic_data)
-#For deaths average = 1.33
 
-
+# average deaths = 1.33, so classifying counties as 1(high risk) or 0(ow risk) depending upon the number of deaths over or under the average
 Economic_data <- Economic_data %>%
   mutate(target = ifelse(deaths > 1.33, 1, 0))
 summary(Economic_data)
 
-# Assuming your data frame is named 'Economic_data' and you want to scale specific numeric columns
+# List of columns whose values we want to scale
 columns_to_scale <- c("confirmed_cases", "deaths", "total_pop", "median_income", "income_per_capita", "median_rent", "gini_index", "households_public_asst_or_food_stamps", "poverty")
 
 # Extract the columns to scale
 columns_scaled <- Economic_data[, columns_to_scale]
-
-# Scale the selected columns
 scaled_columns <- scale(columns_scaled)
 
-# Create a new data frame with scaled columns
+# Create a new data frame with scaled columns 
 scaled_data <- cbind(Economic_data[, -which(names(Economic_data) %in% columns_to_scale)], as.data.frame(scaled_columns))
 head(scaled_data)
 scaled_data <- na.omit(scaled_data)
 
-dim(scaled_data)
+# Removing columns not needed for building the model for our analysis
 
-summary(Economic_data)
-summary(scaled_data)
 scaled_data$county_fips_code <- NULL
 scaled_data$county <- NULL
 scaled_data$county_name <- NULL
@@ -64,14 +58,7 @@ scaled_data$confirmed_cases <- NULL
 scaled_data$deaths <- NULL
 scaled_data$total_pop <- NULL
 
-summary(scaled_data)
-summary(Economic_data)
-
-
-library(gplots)
-library(seriation)
-install.packages("gplots")
-
+# Creating correlation matrix and reordering samples and features based on seriation result
 cm <- cor(scaled_data %>% select_if(is.numeric) %>% na.omit)
 
 seriation_result <- seriate(cm)
@@ -82,7 +69,7 @@ cm_seriated <- cm[seriated_order, seriated_order]
 # Set the size of the image
 image_size <- 1500
 
-# Create a PNG device with the specified size
+# Create a PNG device with the specified size and visualize correlation between features 
 png("heatmap.png", width = image_size, height = image_size, units = "px", res = 300)
 
 heatmap.2(
@@ -100,14 +87,10 @@ heatmap.2(
   cexCol = 0.65,  # Adjust text size for columns
 )
 
-
 dev.off()
 
 
-# Load required libraries
-library(tidyverse)
-library(maps)
-
+# visualize the map of the US and categorise high risk and low risk counties in US, based on average number of deaths 
 # Create a tibble of county map data
 counties <- as_tibble(map_data("county"))
 
@@ -132,13 +115,8 @@ ggplot(counties_all, aes(long, lat)) +
   labs(title = "U.S. Map with County Target Values") +
   theme_minimal()
 
-
 dev.off()
 
-
-
-library(tidyverse)
-library(maps)
 
 # Create a tibble of county map data
 counties <- as_tibble(map_data("county"))
@@ -173,12 +151,7 @@ ggplot(counties_all_tx, aes(long, lat)) +
 # Save the map
 dev.off()
 
-
-
-
-scaled_data$state <-Economic_data$state
-scaled_data$county <- Economic_data$county_name
-
+# we take all the counties outside Texas for the training set
 training_data <- scaled_data %>% filter(state != "TX")
 
 # Testing set: only Texas samples
@@ -188,25 +161,8 @@ testing_data <- scaled_data %>% filter(state == "TX")
 cat("Training Set Size:", nrow(training_data), "\n")
 cat("Testing Set Size:", nrow(testing_data), "\n")
 
-
-
-
 summary(training_data)
 summary(testing_data)
-
-# Load necessary libraries
-library(rpart)
-library(randomForest)
-library(e1071)
-library(class)
-library(nnet)
-library(xgboost)
-library(MASS)
-library(caret)
-library(adabag)
-library(ggplot2)
-# Load the required library
-library(randomForest)
 
 # Select columns for modeling
 selected_columns <- c("median_income", "gini_index", "income_per_capita", "median_rent", "households_public_asst_or_food_stamps", "poverty")
@@ -216,8 +172,6 @@ model_rf <- randomForest(target ~ ., data = training_data[, c(selected_columns, 
 predictions <- predict(model_rf, newdata = testing_data[, selected_columns], type = "response")
 
 threshold <- 0.32
-
-
 
 # Convert predictions and true_labels to factors with the same levels
 df$predictions <- factor(ifelse(predictions > threshold, 1, 0), levels = c(0, 1))
@@ -240,13 +194,6 @@ optimal_threshold <- thresholds[which.max(f1_scores)]
 print(paste("Optimal Threshold for F1 Score:", optimal_threshold))
 
 
-
-
-
-
-
-
-
 # Convert scores to binary class labels
 binary_predictions <- ifelse(predictions > threshold, 1, 0)
 
@@ -258,7 +205,6 @@ varImpPlot(model_rf, main = "Variable Importance in Random Forest")
 
 # Close the PNG device
 dev.off()
-
 
 
 # Evaluate the model performance
@@ -275,14 +221,6 @@ cat("Precision:", precision, "\n")
 cat("Recall:", recall, "\n")
 cat("F1 Score:", f1_score, "\n")
 
-
-
-
-
-
-
-
-
 # Create a tibble of county map data
 counties <- as_tibble(map_data("county"))
 
@@ -291,7 +229,6 @@ counties <- counties %>%
   rename(c(county = subregion, state = region)) %>%
   mutate(state = state.abb[match(state, tolower(state.name))]) %>%
   select(state, county, long, lat, group)
-
 
 # Filter Economic_data and counties_all for Texas
 economic_data_tx <- Economic_data %>% filter(state == "TX")
@@ -321,13 +258,6 @@ ggplot(counties_all_tx, aes(long, lat)) +
 # Save the map
 dev.off()
 
-
-
-
-
-
-
-
 # Load the required library for SVM
 library(e1071)
 
@@ -337,9 +267,7 @@ selected_columns <- c("median_income", "gini_index", "income_per_capita", "media
 # Train SVM Model
 model_svm <- svm(target ~ ., data = training_data[, c(selected_columns, "target")], kernel = "linear")
 predictions <- predict(model_svm, newdata = testing_data[, selected_columns])
-
 true_labels <- testing_data$target
-
 
 # Assuming your predictions and true labels are stored in 'predictions' and 'true_labels'
 library(caret)
@@ -367,11 +295,6 @@ f1_scores <- sapply(thresholds, function(threshold) {
 optimal_threshold <- thresholds[which.max(f1_scores)]
 print(paste("Optimal Threshold for F1 Score:", optimal_threshold))
 
-
-
-
-
-
 mean(predictions)
 threshold <- 0.21
 
@@ -387,7 +310,6 @@ plot(1:length(selected_columns), coef_magnitude, type = 'b', xlab = 'Variable', 
 
 # Add feature names to the plot
 text(1:length(selected_columns), coef_magnitude, labels = names(coef_magnitude), pos = 3, cex = 0.8, col = "blue")
-
 
 # Close the PNG device
 dev.off()
@@ -434,14 +356,6 @@ ggplot(counties_all_tx, aes(long, lat)) +
 # Save the map
 dev.off()
 
-
-
-
-
-
-
-
-
 # Load the required library for k-NN
 # Select columns for modeling
 selected_columns <- c("median_income", "gini_index", "income_per_capita", "median_rent", "households_public_asst_or_food_stamps", "poverty")
@@ -460,8 +374,6 @@ model_knn
 
 # Convert scores to binary class labels
 binary_predictions <- model_knn
-
-
 
 # Evaluate the model performance
 conf_matrix <- table(binary_predictions, testing_data$target)
@@ -505,11 +417,6 @@ ggplot(counties_all_tx, aes(long, lat)) +
 
 # Save the map
 dev.off()
-
-
-
-
-
 
 
 # Naive Bayes
@@ -563,30 +470,6 @@ ggplot(counties_all_tx, aes(long, lat)) +
 # Save the map
 dev.off()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Install the neuralnet package if not already installed
-if (!require(neuralnet)) {
-  install.packages("neuralnet")
-}
-
-# Load the neuralnet package
-library(neuralnet)
-
 # Neural Networks
 model_nn <- neuralnet(target ~ ., data = training_data[, c(selected_columns, "target")], 
                       hidden = c(5, 2), linear.output = TRUE)
@@ -596,7 +479,6 @@ predictions_nn <- predict(model_nn, newdata = testing_data[, selected_columns])
 
 predictions_nn
 
-# Example of hyperparameter tuning
 model_nn <- neuralnet(
   target ~ ., 
   data = training_data[, c(selected_columns, "target")], 
@@ -611,21 +493,6 @@ model_nn <- neuralnet(
 # Make predictions
 predictions_nn <- predict(model_nn, newdata = testing_data[, selected_columns])
 binary_predictions_nn <- ifelse(predictions_nn > threshold, 1, 0)
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Assuming your predictions and true labels are stored in 'predictions' and 'df$true_labels'
-library(caret)
 
 # Convert predictions and true_labels to factors with the same levels
 df$predictions <- factor(ifelse(predictions_nn > threshold, 1, 0), levels = c(0, 1))
@@ -647,20 +514,12 @@ f1_scores <- sapply(thresholds, function(threshold) {
 optimal_threshold <- thresholds[which.max(f1_scores)]
 print(paste("Optimal Threshold for F1 Score:", optimal_threshold))
 
-
-
-
-
-
 mean(predictions)
 threshold <- 1
 
 # Convert scores to binary class labels
 binary_predictions <- ifelse(predictions > threshold, 1, 0)
 binary_predictions
-
-
-
 
 # Evaluate the model performance
 conf_matrix <- table(binary_predictions, testing_data$target)
@@ -704,22 +563,6 @@ ggplot(counties_all_tx, aes(long, lat)) +
 
 # Save the map
 dev.off()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 training_data[, c(selected_columns, "target")]
@@ -783,58 +626,3 @@ ggplot(counties_all_tx, aes(long, lat)) +
 
 # Save the map
 dev.off()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Linear Discriminant Analysis (LDA)
-model_lda <- lda(target_variable ~ ., data = train_data)
-predictions_lda <- predict(model_lda, newdata = test_data)$class
-
-# Ensemble Learning (Voting Classifier)
-models <- list(
-  logistic_reg = glm(target_variable ~ ., data = train_data, family = "binomial"),
-  random_forest = randomForest(target_variable ~ ., data = train_data)
-)
-ensemble <- caretEnsemble(models)
-predictions_ensemble <- predict(ensemble, newdata = test_data)
-
-# Adaboost
-model_adaboost <- boosting(target_variable ~ ., data = train_data)
-predictions_adaboost <- predict(model_adaboost, newdata = test_data)
-
-# Add any additional models as needed...
-
-# Evaluate and compare model performances
-# ... (insert code for evaluating and comparing model performances)
-
-# Note: Ensure that you customize the code based on your specific dataset and requirements.
-
-
-
-
-
